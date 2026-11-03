@@ -179,14 +179,14 @@ def discover_project(context: ScanContext) -> list[Path]:
         raise UnskeinError(ErrorKey.PATH_NOT_FOUND, {"path": str(root)})
     config = context.analysis
     adapter = PythonAdapter(config)
-    # Test-named files are filtered after the walk: those other code imports are kept.
-    spec = load_exclude_spec(root, config.exclude, config.include_tests, test_file_names=False)
+    # ``*_test.py`` files are filtered after the walk: those other code imports are kept.
+    spec = load_exclude_spec(root, config.exclude, config.include_tests, test_like_names=False)
     evidence = load_evidence_spec(root, config.exclude, config.include_tests)
     files = sorted(
         adapter.discover_files(root, spec, config.follow_symlinks, evidence_spec=evidence)
     )
     if not config.include_tests:
-        files = drop_unimported_test_files(files)
+        files = drop_unimported_test_files(files, config)
     sources = sum(1 for path in files if path.suffix in adapter.file_extensions)
     if not sources:
         raise UnskeinError(ErrorKey.NO_FILES_FOUND, {"path": str(root)})

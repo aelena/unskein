@@ -118,7 +118,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are now found inside the project (also as the stub files git writes when
   `core.symlinks` is off) and resolved to the real package; with `--follow-symlinks`,
   files reached through the link keep their real names. `[analysis] module_aliases`
-  declares aliases that cannot be detected.
+  declares aliases that cannot be detected. `untangle --prove` hands the aliases to the
+  re-analysis of its copy, which holds no links, so a cut through an alias is judged on
+  the same graph as the original.
 
 ## [0.3.0] - 2026-10-01
 

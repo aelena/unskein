@@ -3,15 +3,16 @@ from pathlib import Path
 
 import pathspec
 
+from unskein.config import AnalysisConfig
 from unskein.parsers.python_parser import PythonAdapter
 
 MakeProject = Callable[[dict[str, str]], Path]
 EMPTY_SPEC = pathspec.PathSpec([])
 
 
-def edges(root: Path) -> set[tuple[str, str, bool]]:
+def edges(root: Path, config: AnalysisConfig | None = None) -> set[tuple[str, str, bool]]:
     """Parse a project the way a scan does and return its (source, target, external) edges."""
-    adapter = PythonAdapter()
+    adapter = PythonAdapter(config)
     files = list(adapter.discover_files(root, EMPTY_SPEC))
     plan = adapter.plan_parse(files, root)
     found = set()
@@ -83,3 +84,24 @@ def test_import_that_already_resolves_in_the_project_is_left_alone(
     )
 
     assert ("tools.run", "core", False) in edges(root)
+
+
+def test_script_resolves_a_sibling_and_a_package_alias_in_the_same_project(
+    make_project: MakeProject,
+) -> None:
+    root = make_project(
+        {
+            "verwaltung/__init__.py": "",
+            "verwaltung/admin_web/__init__.py": "",
+            "verwaltung/admin_web/api.py": "",
+            "tools/run.py": "import helper\nimport admin_web.api\nfrom admin_web import api\n",
+            "tools/helper.py": "",
+        }
+    )
+    config = AnalysisConfig(module_aliases={"admin_web": "verwaltung.admin_web"})
+
+    found = edges(root, config)
+
+    assert ("tools.run", "tools.helper", False) in found
+    assert ("tools.run", "verwaltung.admin_web.api", False) in found
+    assert not {target for _, target, _ in found if target.startswith("admin_web")}

@@ -112,6 +112,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Imports through a directory symlink that gives a package a second name
+  (`src/admin_web -> verwaltung/admin_web`, imported as `admin_web`) were reported as
+  third-party, so the package looked orphaned and its dependencies vanished. Such links
+  are now found inside the project (also as the stub files git writes when
+  `core.symlinks` is off) and resolved to the real package; with `--follow-symlinks`,
+  files reached through the link keep their real names. `[analysis] module_aliases`
+  declares aliases that cannot be detected. `untangle --prove` hands the aliases to the
+  re-analysis of its copy, which holds no links, so a cut through an alias is judged on
+  the same graph as the original.
 - A script in a directory without `__init__.py` that imports a file next to it
   (`import helper` in `tools/run.py`) had that import reported as third-party, since
   Python finds the file only because the script's directory is first on `sys.path`.

@@ -112,11 +112,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A production module named like a test (`quellen_test.py`, matched by `*_test.py`) was
-  excluded as test code, so every import of it was reported as an unresolved import of
-  a module that does not exist, with a misleading fix. A `*_test.py` file outside the
-  test directories is now kept when code outside the tests imports it; every other
-  test file is still left out unless `--include-tests` is passed.
+- Imports through a directory symlink that gives a package a second name
+  (`src/admin_web -> verwaltung/admin_web`, imported as `admin_web`) were reported as
+  third-party, so the package looked orphaned and its dependencies vanished. Such links
+  are now found inside the project (also as the stub files git writes when
+  `core.symlinks` is off) and resolved to the real package; with `--follow-symlinks`,
+  files reached through the link keep their real names. `[analysis] module_aliases`
+  declares aliases that cannot be detected. `untangle --prove` hands the aliases to the
+  re-analysis of its copy, which holds no links, so a cut through an alias is judged on
+  the same graph as the original.
 
 ## [0.3.0] - 2026-10-01
 

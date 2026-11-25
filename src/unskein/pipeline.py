@@ -233,4 +233,6 @@ def _parse_parallel(
     except BrokenProcessPool:
         logger.warning("A parsing worker died; parsing again sequentially")
         return adapter.parse(files, root)
-    return ParseResult.from_file_results(adapter.language_name, file_results, plan=plan)
+    return ParseResult.from_file_results(
+        adapter.language_name, adapter.refine(plan, file_results), plan=plan
+    )

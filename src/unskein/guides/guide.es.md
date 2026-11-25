@@ -520,7 +520,9 @@ solo nodo, porque describe la arquitectura, no la tabla de módulos del intérpr
 
 Un script en un directorio sin `__init__.py` que importa un archivo vecino
 (`import helper` en `tools/run.py`, ejecutado como `python tools/run.py`) depende de
-`tools.helper`, como lo resuelve Python.
+`tools.helper`, como lo resuelve Python. Esto vale solo para scripts: si otro código
+importa el módulo (`import tools.run`), o lo empaqueta un paquete listado en un
+manifiesto, `import helper` sigue siendo un import de terceros.
 
 La tabla `[findings]` ajusta los hallazgos; los módulos que se ejecutan desde fuera
 del código se pueden listar en `entry_points` (los scripts de `pyproject.toml` y los

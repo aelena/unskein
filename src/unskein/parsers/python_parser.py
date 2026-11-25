@@ -2,7 +2,7 @@
 
 import ast
 from collections import defaultdict
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -13,7 +13,7 @@ from unskein.parsers.aliases import find_package_aliases, resolve_alias
 from unskein.parsers.base import LanguageAdapter
 from unskein.parsers.discovery import detect_encoding, walk_files
 from unskein.parsers.exports import module_exports
-from unskein.parsers.layout import ModuleName, build_layout, name_files
+from unskein.parsers.layout import PACKAGE_INIT_FILE, ModuleName, build_layout, name_files
 from unskein.parsers.models import (
     STAR_EXPORT,
     FileParseResult,
@@ -215,6 +215,10 @@ class ProjectIndex:
             of importable names that are not modules themselves), compiled extensions and
             stubs. All of them are in ``modules``; namespace packages are also in ``packages``.
         aliases: Second names of packages (directory links), mapped to their real names.
+        script_candidates: Modules that may be run as files (see ``find_script_candidates``).
+        scripts: The candidates no project module imports, which resolve imports of the
+            files next to them; empty until the whole project has been parsed once
+            (see ``PythonAdapter.refine``).
     """
 
     modules: frozenset[str]
@@ -224,6 +228,8 @@ class ProjectIndex:
     # A dict cannot be hashed; the other fields identify the index.
     virtual: dict[str, VirtualKind] = field(default_factory=dict, hash=False)
     aliases: dict[str, str] = field(default_factory=dict, hash=False)
+    script_candidates: frozenset[str] = frozenset()
+    scripts: frozenset[str] = frozenset()
 
     @classmethod
     def from_names(
@@ -284,6 +290,24 @@ class ProjectIndex:
             ``verwaltung.admin_web.api``), or the name itself when it uses no alias.
         """
         return resolve_alias(name, self.aliases)
+
+    def sibling(self, source: str, name: str) -> str | None:
+        """Return the module next to a script that an absolute import of a name loads.
+
+        Args:
+            source: Dotted name of the importing module, one of ``scripts``.
+            name: Dotted name taken from an absolute import that is external.
+
+        Returns:
+            The project name of the import (``tools.helper.io`` for ``helper.io`` in
+            ``tools.run``) when its first segment is a module in the same directory;
+            None otherwise.
+        """
+        directory = source.rpartition(NAME_SEPARATOR)[0]
+        first = name.partition(NAME_SEPARATOR)[0]
+        if f"{directory}{NAME_SEPARATOR}{first}" not in self.modules:
+            return None
+        return f"{directory}{NAME_SEPARATOR}{name}"
 
     @property
     def namespaces(self) -> frozenset[str]:
@@ -395,7 +419,7 @@ class _ImportCollector:
         self.file_path = file_path
         self.source = source
         self.index = index
-        self.is_package = file_path.name == "__init__.py"
+        self.is_package = file_path.name == PACKAGE_INIT_FILE
         self.edges: list[ImportEdge] = []
         self.re_exports: list[ReExport] = []
         self.wildcards: list[tuple[int, str]] = []
@@ -526,10 +550,10 @@ class _ImportCollector:
     def script_sibling(self, name: str) -> str:
         """Return the module an absolute import loads when it names a file next to a script.
 
-        ``python dir/script.py`` puts ``dir`` first on ``sys.path``, so in a directory
-        without ``__init__.py`` ``import helper`` loads ``dir/helper.py``, which the
-        project names ``dir.helper``. Python would not reach the file that way if the
-        module were imported as part of a package, so only namespace directories count.
+        ``python dir/script.py`` puts ``dir`` first on ``sys.path``, so ``import helper``
+        loads ``dir/helper.py``, which the project names ``dir.helper``. Python does not
+        reach the file that way when the module is imported (``dir.script``) or run with
+        ``-m``, so only the modules in ``index.scripts`` resolve siblings.
 
         Args:
             name: Dotted name taken from an absolute import.
@@ -537,15 +561,9 @@ class _ImportCollector:
         Returns:
             The sibling's project name, or the name itself when no sibling matches.
         """
-        if self.is_package or PATH_SEPARATOR in self.source or not self.index.is_external(name):
+        if self.source not in self.index.scripts or not self.index.is_external(name):
             return name
-        directory = self.source.rpartition(NAME_SEPARATOR)[0]
-        if not directory or not self.index.is_namespace(directory):
-            return name
-        first = name.partition(NAME_SEPARATOR)[0]
-        if f"{directory}{NAME_SEPARATOR}{first}" not in self.index.modules:
-            return name
-        return f"{directory}{NAME_SEPARATOR}{name}"
+        return self.index.sibling(self.source, name) or name
 
     def visit(self, tree: ast.Module) -> None:
         """Collect every import in a module, including nested ones, in code order.
@@ -763,6 +781,51 @@ def parse_file(
     return FileParseResult(module, collector.re_exports, collector.warnings)
 
 
+def find_script_candidates(
+    named: Iterable[tuple[Path, ModuleName]], index: ProjectIndex
+) -> frozenset[str]:
+    """Return the modules that may be run as files and so may import the files next to them.
+
+    A candidate is a plain module (not an ``__init__.py``) with an importable name, in a
+    directory without ``__init__.py``, that no package listed by a manifest ships. A
+    module of a regular package or of a shipped namespace package is installed and
+    imported by its full name, and then Python does not find its siblings by a bare name.
+
+    Args:
+        named: Every source file with the name the layout gives it.
+        index: Project index with the namespace packages.
+
+    Returns:
+        The names of the candidates.
+    """
+    candidates = set()
+    for path, name in named:
+        if name.is_declared or path.name == PACKAGE_INIT_FILE or PATH_SEPARATOR in name.name:
+            continue
+        directory = name.name.rpartition(NAME_SEPARATOR)[0]
+        if directory and index.is_namespace(directory):
+            candidates.add(name.name)
+    return frozenset(candidates)
+
+
+def _is_script_with_sibling(module: ModuleInfo, index: ProjectIndex) -> bool:
+    """Tell whether a module is a script with an external import that names a file next to it.
+
+    Args:
+        module: Parsed module.
+        index: Project index, with its scripts.
+
+    Returns:
+        True when parsing the module again as a script would change at least one import.
+    """
+    if module.name not in index.scripts:
+        return False
+    for edge in module.imports:
+        if edge.is_external and index.sibling(module.name, edge.target) is not None:
+            return True
+    return False
+
+
 def _namespace_owners(
     index: ProjectIndex, names: list[ModuleName], module_distributions: dict[str, str]
 ) -> dict[str, bool]:
@@ -906,6 +969,7 @@ class PythonAdapter(LanguageAdapter):
             name: VirtualModule(VirtualKind.NAMESPACE, shipped)
             for name, shipped in namespaces.items()
         } | native
+        index = replace(index, script_candidates=find_script_candidates(named, index))
         return ParsePlan(
             tasks,
             index,
@@ -931,3 +995,44 @@ class PythonAdapter(LanguageAdapter):
         """
         path, name = task
         return parse_file(path, name, shared, self.config)
+
+    def refine(self, plan: ParsePlan, file_results: list[FileParseResult]) -> list[FileParseResult]:
+        """Parse again, as scripts, the candidates that no project module imports.
+
+        Whether a module is a script is only known once every file has been parsed: the
+        first pass resolves no sibling, so its internal edges are the imports by full
+        name. A candidate none of them points at is a script; one imported only by a
+        bare name from a file next to it stays a script, because Python loads it from
+        the same directory. Only scripts with an import that names a sibling are parsed
+        again, here and one by one: they are few, and they already parsed within the
+        per-file limits.
+
+        Args:
+            plan: The plan the files were parsed from.
+            file_results: One result per task of the plan, in the same order.
+
+        Returns:
+            The results, with those of the scripts that import a sibling replaced.
+        """
+        index: ProjectIndex = plan.shared
+        if not index.script_candidates:
+            return file_results
+        imported = {
+            edge.target
+            for result in file_results
+            if result.module is not None
+            for edge in result.module.imports
+            if not edge.is_external
+        }
+        scripts = index.script_candidates - imported
+        if not scripts:
+            return file_results
+        with_scripts = replace(index, scripts=scripts)
+        refined = []
+        for task, result in zip(plan.tasks, file_results, strict=True):
+            module = result.module
+            if module is not None and _is_script_with_sibling(module, with_scripts):
+                refined.append(self.parse_task(task, with_scripts))
+            else:
+                refined.append(result)
+        return refined

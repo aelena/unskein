@@ -505,7 +505,9 @@ because it describes the architecture, not the interpreter's module table.
 
 A script in a directory without `__init__.py` that imports a file next to it
 (`import helper` in `tools/run.py`, run as `python tools/run.py`) depends on
-`tools.helper`, as Python resolves it.
+`tools.helper`, as Python resolves it. This holds only for scripts: if other code
+imports the module (`import tools.run`), or a package listed in a manifest ships it,
+`import helper` stays a third-party import.
 
 The `[findings]` table tunes the findings; modules that are run from outside the
 code can be listed in `entry_points` (scripts in `pyproject.toml` and `__main__`

@@ -92,6 +92,15 @@ class LanguageAdapter(ABC):
     def parse(self, files: list[Path], root: Path) -> ParseResult:
         """Secuencial, construido sobre plan_parse + parse_task (un solo camino)."""
 
+    def refine(self, plan: ParsePlan, file_results: list[FileParseResult]) -> list[FileParseResult]:
+        """Corrige los resultados con lo que solo dice el proyecto entero (default: nada)."""
+    # Una vez, en el proceso principal, tras todas las tareas (secuencial o paralelo).
+    # Python lo usa para los scripts: un módulo en un directorio sin `__init__.py`, que
+    # ningún paquete listado en un manifiesto empaqueta y que nadie importa, se vuelve
+    # a parsear resolviendo `import helper` al archivo vecino. Que nadie lo importe solo
+    # se sabe con todos los archivos parseados; solo se repiten los scripts con un
+    # import que nombra a un vecino.
+
     @abstractmethod
     def normalize_module_name(self, file_path: Path, root: Path) -> str: ...
 

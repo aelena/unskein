@@ -594,11 +594,16 @@ class ModuleName:
         is_packaged: Whether a distribution ships the file.
         distribution: Name of the distribution that ships the file; None when none with
             a name does.
+        is_declared: Whether the distribution that ships the file lists its packages
+            (declared, conventional or found), so the file is known to be installed.
+            False for unpackaged files and under an import root that ships everything
+            (no manifest, ``source_roots``): there a file may as well be a script.
     """
 
     name: str
     is_packaged: bool
     distribution: str | None = None
+    is_declared: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -657,7 +662,8 @@ def _name_with_depth(layout: ProjectLayout, absolute: Path) -> tuple[ModuleName,
         if distribution.packages is None and not parts:
             return ModuleName(distribution.import_root.name, True, owner), depth
         if parts and _ships(distribution, parts):
-            return ModuleName(".".join(parts), True, owner), depth
+            is_declared = distribution.packages is not None
+            return ModuleName(".".join(parts), True, owner, is_declared), depth
     parts = _module_parts(absolute.relative_to(layout.root))
     if all(part.isidentifier() for part in parts):
         return ModuleName(".".join(parts) or layout.root.name, False), -1

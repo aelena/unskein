@@ -81,11 +81,27 @@ class LanguageAdapter(ABC):
             The parsed modules plus any per-file warnings.
         """
         plan = self.plan_parse(files, root)
+        file_results = [self.parse_task(task, plan.shared) for task in plan.tasks]
         return ParseResult.from_file_results(
-            self.language_name,
-            (self.parse_task(task, plan.shared) for task in plan.tasks),
-            plan=plan,
+            self.language_name, self.refine(plan, file_results), plan=plan
         )
+
+    def refine(self, plan: ParsePlan, file_results: list[FileParseResult]) -> list[FileParseResult]:
+        """Correct the per-file results with what only the whole project tells.
+
+        A file is parsed without seeing the others; an adapter overrides this when the
+        meaning of an import depends on them. Runs once, in the main process, after
+        every task of the plan (sequential or parallel).
+
+        Args:
+            plan: The plan the files were parsed from.
+            file_results: One result per task of the plan, in the same order.
+
+        Returns:
+            The results to combine, in the same order; by default, the ones given.
+        """
+        del plan  # the default has nothing to correct
+        return file_results
 
     @abstractmethod
     def normalize_module_name(self, file_path: Path, root: Path) -> str:
